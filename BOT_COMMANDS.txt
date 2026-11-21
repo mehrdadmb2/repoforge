@@ -1,0 +1,20 @@
+start - Start RepoForge and verify the admin account
+help - Show the full command guide
+status - Show Worker, GitHub and storage status
+repos - List repositories allowed by the server
+select - Select a repository and target branch
+current - Show the active repository and branch
+upload - Show ZIP upload instructions
+upload - Show ZIP upload instructions
+preview - Show the latest or selected deployment preview
+files - Browse file actions in a deployment preview
+keep - Keep one path unchanged
+update - Select a ZIP path for upload
+delete - Delete a matching repository path
+deploy - Request deployment confirmation
+sync - Refresh a pending deployment preview
+backup - Create a manual branch snapshot
+backups - List recorded backup snapshots
+restore - Request backup restoration confirmation
+history - Show recent commits for the selected branch
+cancel - Cancel a pending deployment job
