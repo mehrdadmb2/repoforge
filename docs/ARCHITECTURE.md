@@ -1,75 +1,83 @@
-# RepoForge architecture
+# RepoForge v2.0 architecture
 
-## High-level flow
+## Components
 
-```mermaid
-flowchart TD
-    A[Administrator] --> B[GitHub Pages dashboard]
-    A --> C[Telegram private bot]
-    B --> D[Cloudflare Worker API]
-    C --> E[Telegram webhook on Worker]
-    E --> D
-    D --> F[Workers KV: jobs, selections, audit]
-    D --> G[R2: uploaded ZIP archives]
-    D --> H[GitHub REST API]
-    H --> I[Target repository branch]
-    H --> J[repoforge-backup-* branch]
+### GitHub Pages
+
+The repository root contains `index.html` and `config.js`. Static assets are under `assets/`. The Pages workflow assembles a minimal `dist/` folder with only the root website files and publishes that artifact. `worker/` and `docs/` are deliberately excluded from the public site artifact.
+
+### Cloudflare Worker
+
+The Worker is an API-only service. Its responsibilities are authentication, allowlist enforcement, GitHub API access, Telegram webhook processing, metadata persistence and coordinating the multi-request deployment lifecycle.
+
+### Workers KV
+
+Only one KV namespace is required:
+
+| Key prefix | Purpose | Retention |
+|---|---|---|
+| `session:` | HMAC session revocation state | Session TTL |
+| `login-attempt:` | Login throttling | 15 minutes |
+| `job:` | Full release manifest, file choices and deployment state | 14 days |
+| `job:summary:` | Compact list-card metadata; avoids reading full jobs for dashboard lists | 14 days |
+| `job:index` | Recently created job IDs, newest first | 14 days |
+| `payload:` | Base64 file content prepared by the browser | 14 days |
+| `backup:` | Backup metadata indexed by repository | Persistent until manually cleaned |
+| `backup-id:` | Direct lookup index by backup ID | Persistent until manually cleaned |
+| `backup:index` | Latest backup metadata for dashboard and bot lists | Persistent, last 500 entries |
+| `stage:` | Telegram file ID, target repo/branch and upload metadata (no ZIP bytes) | 1 hour |
+| `tg-selection:` | Selected repository and branch for admin | 14 days |
+| `tg-*menu:` | Temporary inline keyboard menu state | 10 minutes |
+| `tg-update:` | Telegram update deduplication | 24 hours |
+| `event:` | Audit event records | 180 days |
+| `event:index` | Latest 100 audit events, newest first | 180 days |
+
+No R2, D1, Durable Object, external database or paid Workers CPU plan is assumed. v1 R2-backed pending jobs are excluded from the v2 queue because their payloads are not available in KV; legacy backup metadata is still searched when restoring older snapshots.
+
+## ZIP pipeline
+
+1. Dashboard reads the ZIP as an ArrayBuffer.
+2. `assets/zip.js` parses the ZIP central directory and rejects ZIP64, encrypted entries, unsupported compression, duplicate paths, traversal paths, `.git` paths and symbolic links.
+3. Stored and DEFLATE entries are expanded with the browser's native `DecompressionStream('deflate-raw')` implementation.
+4. The browser sends a manifest to `/api/jobs/prepare`.
+5. The Worker reads the current GitHub branch and recursive Git tree to build a file-level diff.
+6. The browser uploads each file's base64 data using a separate `PUT /api/jobs/:id/files/:index` request. Each payload is one KV value.
+7. `/complete` confirms all expected payload keys are present and changes the job state from `uploading` to `pending`.
+
+The Worker never extracts a ZIP and does not persist the Telegram ZIP bytes. This is intentional: Workers Free has a small CPU budget per request and KV writes are limited on the free tier.
+
+## Telegram ZIP pipeline
+
+1. Bot receives a `.zip` document in a private chat from the configured admin only.
+2. Bot stores only Telegram `file_id`, target repo/branch and metadata in KV; ZIP bytes are not copied into KV.
+3. Bot returns `DASHBOARD_URL?stage=<id>`.
+4. After dashboard login, the Worker obtains a fresh Telegram file path and streams the ZIP directly to the browser. The browser extracts it locally and uses the same prepare/upload/complete API flow as a dashboard upload.
+5. Stage metadata is deleted after successful transfer, or expires automatically after one hour.
+
+## Deployment state machine
+
+```text
+uploading
+   │ all payloads present
+   ▼
+pending ── branch changed ──> stale ── refresh ──> pending
+   │
+   │ start: verify base SHA + create backup branch
+   ▼
+deploying
+   │ one request per selected file -> GitHub Blob SHA saved in KV
+   │ final request -> Git Tree -> Commit -> non-force Ref update
+   ├── success ──> deployed
+   ├── branch moved ──> stale
+   └── user cancels ──> cancelled
 ```
 
-## Upload and preview
+The deployment phases are separate requests so each Worker invocation performs a bounded amount of CPU work. The final Git ref update is non-force. It will not overwrite a concurrent non-fast-forward update.
 
-1. The user selects an allowlisted repository and branch, then uploads a ZIP.
-2. The Worker validates archive structure before extraction: entry count, total expanded bytes, per-file size, encryption, compression method, ZIP64, symlinks, duplicate names and unsafe paths.
-3. A common top-level directory can optionally be stripped. The dashboard exposes this as a checkbox; Telegram defaults it on.
-4. The Worker downloads the target branch HEAD and recursive Git tree.
-5. A preview is built from the union of ZIP paths and repository paths:
-   - ZIP-only or matching ZIP paths default to `update`.
-   - Repository-only paths default to `keep`.
-6. The archive is retained in R2; job metadata and path choices are stored in KV.
+## Backup and restore
 
-## Deployment
+A backup creates a branch `repoforge-backup-<timestamp>-<id>` at the exact commit observed before deployment. Its metadata stores the repo, original branch, commit SHA and backup branch name. Restore creates a new commit whose tree matches the backup but whose parent is the current branch tip, then advances the branch without force-pushing. A pre-restore backup is created first.
 
-1. The Worker reloads the job and confirms it is pending.
-2. The current branch SHA is compared with the preview's base SHA. A mismatch marks the job stale.
-3. Every selected path is validated against the preview manifest. The changed-file cap is checked before GitHub mutations.
-4. The job status is marked `deploying`.
-5. A backup branch is created at the current HEAD.
-6. Selected ZIP files are uploaded as Git blobs. Deletions are represented as `sha: null` tree entries.
-7. A new Git tree is created using the current tree as `base_tree`.
-8. A single commit is created with the current HEAD as its parent.
-9. The target branch ref is updated with `force: false`.
-10. Job state and an audit event are recorded.
+## Cross-origin model
 
-If the branch moves while the deployment is running, the non-force ref update fails safely. The backup ref remains available. No automatic force-push is attempted.
-
-## Restore
-
-Restore creates a backup of the current target branch first. It fetches the selected backup commit's tree, creates a new commit using that tree and the current HEAD as parent, and advances the branch ref without force. This restores tracked file content while preserving the chronological commit history.
-
-## Authentication
-
-### Dashboard
-
-- User enters one password.
-- Worker validates the password, applies a KV-backed attempt limit, then signs an HMAC session token.
-- Frontend stores the short-lived token in `sessionStorage` and sends it as a Bearer token.
-- Every dashboard API route checks both the signature/expiry and the exact configured `Origin`.
-- The token is not a GitHub credential and cannot be used against GitHub directly.
-
-### Telegram
-
-- Webhook validates `X-Telegram-Bot-Api-Secret-Token`.
-- Each message and callback must originate from the configured numeric admin ID in a private chat.
-- Deploy and restore require a separate inline confirmation callback.
-
-## Storage
-
-| Store | Keys / objects | Retention |
-|---|---|---|
-| KV | `job:<id>` | 14 days |
-| KV | `backup:<repo>:<id>` | No TTL by default |
-| KV | `event:<timestamp>:<id>` | 180 days |
-| KV | `tg-selection:<admin-id>` | No TTL by default |
-| R2 | `uploads/<job-id>.zip` | Configure 14-day bucket lifecycle |
-
-Backup refs live in GitHub. Do not delete `repoforge-backup-*` branches until you no longer need those restore points.
+The Pages site and Worker are different origins. `SITE_ORIGIN` must contain the origin only, for example `https://mehrdadmb2.github.io`, not the `/repoforge/` path. Authenticated browser API calls carry a signed bearer token and must originate from an allowlisted origin. The dashboard URL includes the repository path and is configured separately as `DASHBOARD_URL`.

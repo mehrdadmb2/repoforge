@@ -3,31 +3,23 @@ main = "src/index.js"
 compatibility_date = "2026-11-01"
 workers_dev = true
 
-# Replace the placeholder namespace ID after creating the KV namespace.
+# One Workers KV namespace is sufficient for the Free-plan deployment.
+# No R2 bucket, D1 database, Durable Object, or Paid CPU allowance is required.
 [[kv_namespaces]]
 binding = "STATE"
 id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
-# Create this bucket with: npx wrangler r2 bucket create repoforge-archives
-[[r2_buckets]]
-binding = "ARCHIVES"
-bucket_name = "repoforge-archives"
-
 [vars]
-SITE_ORIGIN = "https://YOUR_GITHUB_USERNAME.github.io"
-MAX_ARCHIVE_BYTES = "18874368"
-MAX_EXPANDED_BYTES = "33554432"
-MAX_FILE_BYTES = "8388608"
+SITE_ORIGIN = "https://mehrdadmb2.github.io"
+DASHBOARD_URL = "https://mehrdadmb2.github.io/repoforge/"
+MAX_ARCHIVE_BYTES = "19922944"
+MAX_EXPANDED_BYTES = "16777216"
+MAX_FILE_BYTES = "1048576"
 MAX_FILES = "400"
 MAX_REMOTE_FILES = "3000"
-MAX_CHANGED_FILES = "25"
+MAX_CHANGED_FILES = "100"
 SESSION_TTL_SECONDS = "21600"
+STAGE_TTL_SECONDS = "3600"
 
 [observability]
 enabled = true
-
-# This limit is for Workers Paid. On the Free plan, the platform's 10 ms CPU
-# ceiling still applies. ZIP processing and multi-file Git operations are best
-# run on Workers Paid; reduce archive/file limits if you stay on Free.
-[limits]
-cpu_ms = 30000

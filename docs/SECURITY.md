@@ -1,46 +1,63 @@
-# Security checklist
+# RepoForge security model
 
-## Credentials
+## Authentication boundaries
 
-- [ ] Create a fine-grained PAT for selected repositories only.
-- [ ] Grant `Metadata: Read-only` and `Contents: Read and write`.
-- [ ] Grant `Workflows: Read and write` only when workflow files must be changed.
-- [ ] Keep token expiration short enough for your rotation policy.
-- [ ] Add the PAT only with `wrangler secret put GITHUB_TOKEN`.
-- [ ] Never add a token to `site/config.js`, frontend JavaScript, a ZIP, README, issue, screenshot or chat log.
-- [ ] Keep `ALLOWED_REPOS` limited to exact `owner/repository` names.
-- [ ] Use a long, unique dashboard password and a random `SESSION_SECRET`.
-- [ ] Use a strong, random `TELEGRAM_WEBHOOK_SECRET` and numeric `TELEGRAM_ADMIN_ID`.
+- Dashboard: a password stored as a Cloudflare Worker secret. Password minimum: 12 characters.
+- Sessions: HMAC-SHA256 signed tokens, server-side revocation nonce in KV and configurable expiration. The browser keeps the token in `sessionStorage`, not `localStorage`.
+- Telegram: private chat only, exact numeric `TELEGRAM_ADMIN_ID` match for both sender and chat ID.
+- Webhook: validates `X-Telegram-Bot-Api-Secret-Token` against `TELEGRAM_WEBHOOK_SECRET`.
+- GitHub: GitHub PAT is stored only as `GITHUB_TOKEN` Worker secret. Every repository access is checked against `ALLOWED_REPOS`.
+- CORS: exact-match origin allowlist. CORS is not the authentication mechanism; the signed dashboard token is also required.
+
+## GitHub permissions
+
+Use a Fine-grained PAT restricted to the smallest useful set of repositories. For the core Git Data workflow:
+
+- Metadata: Read-only
+- Contents: Read and write
+
+Only add Workflows: Read and write if you deliberately deploy `.github/workflows/*`. Do not grant account administration or broad organization permissions for normal file deployment.
+
+## ZIP safety
+
+The browser ZIP parser rejects:
+
+- Absolute paths and Windows drive paths
+- `.` and `..` path segments
+- `.git` paths
+- Duplicate filenames and file/directory path collisions within the ZIP or against the current repository tree
+- Symbolic links
+- Encrypted ZIP entries
+- ZIP64 and multi-disk archives
+- Unsupported compression methods
+- Archives exceeding configured compressed, expanded, per-file or file-count limits
+
+The Worker independently validates every manifest path, file size, unique path and base64 length before accepting payloads. A malicious browser cannot use a path traversal entry to write outside the GitHub repository tree.
 
 ## Deployment safety
 
-- [ ] Keep `MAX_CHANGED_FILES` conservative until you validate Worker CPU and subrequest limits.
-- [ ] Keep ZIP limits conservative; do not increase them without checking the Worker memory limit.
-- [ ] Enable branch protection where appropriate. RepoForge never force-pushes.
-- [ ] Confirm that `repoforge-backup-*` branches are retained by repository cleanup rules.
-- [ ] Configure R2 lifecycle deletion for old `uploads/` objects.
-- [ ] Review the exact update/keep/delete choices before deployment.
-- [ ] Refresh a stale preview; do not deploy against an outdated base SHA.
+- Every deployment requires an explicit file-level action selection.
+- A pre-deploy Git backup branch is created before publishing the commit.
+- Git blob creation is isolated one file per Worker request to stay within Free CPU limits.
+- The branch base SHA is checked both before backup and before final commit publication.
+- The final ref update uses `force: false`.
+- Restore creates a pre-restore backup and a new commit rather than force-pushing an old branch state.
+- A deployment session can be resumed when some Git blobs were created but the final commit was not published.
 
-## Hosting and browser
+## Free-plan storage considerations
 
-- [ ] Configure the exact GitHub Pages origin in `SITE_ORIGIN`, for example `https://username.github.io`.
-- [ ] Do not include a project path such as `/repoforge` in `SITE_ORIGIN`.
-- [ ] Remember that public GitHub Pages source is public even when the dashboard login is enabled.
-- [ ] Use Cloudflare Access or a private authenticated origin if the HTML/JS itself must not be public.
-- [ ] Serve the site and Worker only over HTTPS.
-- [ ] Review third-party font loading policy. The dashboard can use system fallbacks if Google Fonts are unavailable.
+Workers KV Free has finite daily operation quotas and a maximum 25 MiB value size. RepoForge stores each file payload separately and limits each file to 1 MiB. Telegram staging stores only a short-lived `file_id` reference and metadata in KV; the archive is streamed from Telegram to the authenticated dashboard on demand. Its compressed-size limit is 19 MiB and the stage metadata expires after one hour. The dashboard should avoid repeated uploads of hundreds of files; use incremental update ZIPs where practical.
 
-## Operational checks
+## Public Pages limitation
 
-- [ ] Test a ZIP containing a new file, an existing file, and a file absent from the ZIP.
-- [ ] Test Keep on an existing file.
-- [ ] Test Delete on a repository-only file.
-- [ ] Test a manual backup and restore on a disposable branch first.
-- [ ] Test a stale preview by pushing a commit between preview and deployment.
-- [ ] Test wrong Telegram user ID and a non-private chat.
-- [ ] Rotate secrets immediately if a token or password is exposed.
+GitHub Pages is a public static hosting service for this repository configuration. The dashboard's password protects the API and application views, but it cannot make public `index.html`, CSS or JavaScript source files private. Never place secrets in `config.js` or any Pages asset. If the static site itself must be private, use an authenticated hosting/access layer rather than relying on client-side password UI.
 
-## Threat boundaries
+## Incident response
 
-RepoForge is designed for one administrator. It does not protect a compromised GitHub account, Cloudflare account, Telegram account, browser session, or administrator device. A malicious ZIP can still contain harmful source code; path validation protects the repository path namespace, not the semantics of the code being deployed. Always inspect the source before release.
+If a token is exposed:
+
+1. Revoke the GitHub PAT in GitHub settings and issue a replacement.
+2. Revoke the Telegram bot token with BotFather if exposed.
+3. Rotate `SESSION_SECRET`, `DASHBOARD_PASSWORD` and `TELEGRAM_WEBHOOK_SECRET` as appropriate.
+4. Redeploy the Worker.
+5. Review GitHub commit history, backup branches and RepoForge audit events.

@@ -1,118 +1,130 @@
 # RepoForge
 
-**Private GitHub repository deployment control plane** powered by Cloudflare Workers, Workers KV, R2, GitHub REST API, Telegram Bot API and GitHub Pages.
+**Private GitHub deployment control plane powered by GitHub Pages, Cloudflare Workers Free, Workers KV and Telegram.**
 
-RepoForge accepts a ZIP release, inspects its paths, compares them with a selected GitHub branch, and lets the administrator choose an action for every path:
+RepoForge lets one administrator upload a project ZIP, compare it with a selected GitHub repository and branch, decide file-by-file what to update, keep or delete, create a Git backup, and publish the selected changes as one commit.
 
-- **Update** — create or replace the path with the ZIP file.
-- **Keep** — leave the repository path unchanged.
-- **Delete** — remove the matching path from the target branch.
+## v2.0.0 — Free-plan architecture
 
-Paths found in the repository but absent from the ZIP are shown as **repository-only** paths. They default to **Keep** and can be changed to **Delete**. Nothing is changed on GitHub until the administrator confirms deployment.
+This release fixes the original deployment layout and removes the R2 dependency completely.
 
-A deployment creates a dedicated `repoforge-backup-*` branch at the current commit, then creates one Git tree and one commit for the selected file changes. The target branch is updated without force-push. If the branch changed after preview, the job is marked stale and must be refreshed and reviewed again.
-
-## Components
-
-| Component | Responsibility |
-|---|---|
-| `site/` | Responsive GitHub Pages dashboard. No GitHub or Telegram secrets are shipped to the browser. |
-| `worker/` | Authenticated API, GitHub operations, Telegram webhook, ZIP validation and deployment orchestration. |
-| Workers KV (`STATE`) | Session-independent job metadata, admin selection, backup index and audit events. |
-| R2 (`ARCHIVES`) | Temporarily stores ZIP uploads so the Worker can inspect them again at deployment time. |
-| GitHub | Source of truth for files, commits, branches and backup refs. |
-| Telegram | Private administrator interface, ZIP intake, file review and confirmations. |
-
-## Important security model
-
-1. Use a **fine-grained GitHub Personal Access Token**, not a classic account-wide token. Grant access only to the repositories in `ALLOWED_REPOS`.
-2. Required GitHub repository permissions: **Metadata: Read-only** and **Contents: Read and write**. Add **Workflows: Read and write** only if you intend to update files under `.github/workflows/`.
-3. Store the GitHub token, bot token, dashboard password, HMAC session secret, Telegram administrator ID, webhook secret and repository allowlist as **Cloudflare Worker secrets**. They must never be added to GitHub Pages, `config.js`, ZIP archives, or committed files.
-4. `ALLOWED_REPOS` is an additional server-side allowlist. A repository must be both accessible to the PAT and explicitly listed there.
-5. Telegram accepts actions only from `TELEGRAM_ADMIN_ID` in a private chat. The webhook also validates Telegram's `X-Telegram-Bot-Api-Secret-Token` header.
-6. Dashboard login issues a signed, short-lived bearer session stored in `sessionStorage`. It is cleared when the browser tab/session ends or the user locks the dashboard.
-7. GitHub Pages is static hosting: the login gate protects the dashboard controls and every API operation, but **the static HTML/CSS/JavaScript source itself is still publicly downloadable** on a public Pages site. Never put secrets or private repository content in the site bundle. For strict page-level privacy, put the site behind Cloudflare Access or host it on an authenticated private origin.
-8. RepoForge never force-pushes. Branch protection rules may reject direct commits; in that case configure the target branch to allow this deployment model or add a pull-request release workflow before using it on that branch.
-
-## Current release limits
-
-Defaults in `worker/wrangler.toml` are deliberately conservative:
-
-- ZIP archive: 18 MiB maximum (Telegram's Bot API download limit is 20 MB).
-- Expanded content: 32 MiB maximum.
-- Individual file: 8 MiB maximum.
-- ZIP entries: 400 maximum.
-- Repository preview: 3,000 tracked files maximum.
-- Changed files per commit: 25 maximum.
-- ZIP64, encrypted ZIP files, symlinks, multi-disk ZIPs, unsupported compression methods and unsafe paths are rejected.
-
-Cloudflare Workers have a 128 MB isolate memory limit. The Free plan has a 10 ms CPU limit; ZIP decompression and multi-file Git operations are much more practical on Workers Paid with an appropriate CPU limit. This project configures `cpu_ms = 30000`; deploy on a plan that permits that setting. See the official platform limits before increasing archive or file limits.
+- `index.html` and `config.js` are at the repository root, as required by GitHub Pages publishing sources.
+- Dashboard assets are under `/assets`.
+- The Pages workflow creates a clean `dist/` artifact from root website files only. Worker source, documentation and configuration are not published as site assets.
+- Cloudflare storage uses **one Workers KV namespace**. No R2 bucket, D1 database, Durable Object or paid Worker CPU setting is needed.
+- ZIP parsing and DEFLATE extraction happen in the administrator's browser, not in the 10 ms Workers Free CPU runtime.
+- Telegram ZIP uploads store only a temporary Telegram file reference in KV; the Worker streams the archive to the signed-in dashboard on demand.
+- Each file payload is sent to KV in its own small HTTP request. GitHub blobs are also created one per request. A final request creates one Git Tree, one Commit and advances the branch without force-pushing.
+- The bot accepts commands only from the configured numeric Telegram administrator ID in a private chat.
+- The dashboard has password authentication, HMAC-signed sessions, short-lived session storage and login throttling.
 
 ## Repository layout
 
 ```text
 repoforge/
+├── index.html                 # GitHub Pages entry point (repository root)
+├── config.js                  # Public API URL and browser-side limits
+├── assets/
+│   ├── app.js                 # Dashboard and API client
+│   ├── zip.js                 # Browser-side ZIP inspection/extraction
+│   ├── styles.css
+│   └── repoforge.svg
+├── .nojekyll
 ├── .github/workflows/pages.yml
+├── worker/
+│   ├── wrangler.toml          # One KV binding; no R2
+│   ├── package.json
+│   └── src/
+│       ├── index.js           # API router and auth gate
+│       ├── auth.js            # Password login and HMAC sessions
+│       ├── github.js          # GitHub Git Database, backups and deployments
+│       ├── telegram.js        # Admin-only bot and ZIP staging
+│       └── utils.js
 ├── docs/
+│   ├── SETUP-FA.md
 │   ├── ARCHITECTURE.md
 │   ├── SECURITY.md
-│   ├── SETUP-FA.md
 │   └── BRAND-PROMPTS.md
-├── site/
-│   ├── assets/
-│   │   ├── app.js
-│   │   ├── repoforge.svg
-│   │   └── styles.css
-│   ├── config.js
-│   └── index.html
-├── worker/
-│   ├── src/
-│   │   ├── auth.js
-│   │   ├── github.js
-│   │   ├── index.js
-│   │   ├── telegram.js
-│   │   ├── utils.js
-│   │   └── zip.js
-│   ├── .dev.vars.example
-│   ├── package.json
-│   └── wrangler.toml
 ├── BOT_COMMANDS.txt
-└── README.md
+└── LICENSE
 ```
+
+## Deployment model
+
+1. Sign in to the dashboard.
+2. Select one repository and branch from the server-side allowlist.
+3. Select a ZIP. The browser checks the central directory, rejects unsafe paths and unsupported archive features, expands files locally and builds a manifest.
+4. The Worker compares the manifest to the GitHub tree. New and existing ZIP paths default to **Update**; paths found only in GitHub default to **Keep**.
+5. Choose `Update`, `Keep` or `Delete` individually. `Delete` is offered only when a remote file exists.
+6. Start deployment. RepoForge creates a backup branch pointing at the exact current commit.
+7. The browser uploads selected Git blobs through separate requests. The Worker stores each blob SHA in KV so the process can resume after a browser interruption.
+8. The final API request creates one tree and one commit, then moves the target branch with `force: false`. If the branch changed meanwhile, the operation stops and requires a refreshed preview.
+
+## Telegram flow
+
+1. Use `/select` and choose a repository and branch.
+2. Send the ZIP as a Telegram **document**.
+3. The bot stores only the Telegram `file_id` and target metadata in Workers KV, then returns a private dashboard link.
+4. Sign in to the dashboard and open the link. The Worker streams the archive from Telegram to the browser; the browser extracts it and creates the file-level preview.
+5. Use Telegram or the dashboard to inspect and change file actions. The bot can start the backup/deployment session and then links back to the dashboard for the per-file Blob requests and final commit.
+
+## Free-plan profile and limits
+
+The supplied defaults are deliberately conservative:
+
+| Limit | Default |
+|---|---:|
+| Telegram ZIP compressed download limit | 19 MiB |
+| Expanded archive size | 16 MiB |
+| Individual file size | 1 MiB |
+| ZIP file count | 400 |
+| Repository file count for preview | 3,000 |
+| Changed files per commit | 100 |
+| Temporary Telegram stage | 1 hour |
+| Job manifest retention | 14 days |
+| File payload retention | 14 days |
+
+These application limits do not increase Cloudflare or Telegram limits. Workers Free has a 10 ms CPU budget per invocation; Workers KV Free has finite daily read/write quotas and a 25 MiB value-size ceiling. Telegram's hosted Bot API currently limits `getFile` downloads to 20 MB. The 19 MiB cap leaves headroom. Keep an eye on KV write quotas when uploading many hundreds of files. See the linked official documentation in `docs/SETUP-FA.md`.
+
+## Required secrets
+
+Set these with `wrangler secret put` in the `worker/` directory:
+
+- `GITHUB_TOKEN`
+- `ALLOWED_REPOS`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_ADMIN_ID`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `DASHBOARD_PASSWORD`
+- `SESSION_SECRET`
+
+Only the public dashboard origin and base URL are stored in `wrangler.toml` and `config.js`. Never put a GitHub token, Telegram bot token or dashboard password in the Pages bundle.
 
 ## Quick start
 
-The complete Persian setup guide is in [`docs/SETUP-FA.md`](docs/SETUP-FA.md). Follow it in order:
+See **[docs/SETUP-FA.md](docs/SETUP-FA.md)** for the complete Windows PowerShell setup. The dashboard URL for this repository is:
 
-1. Create the GitHub repository `repoforge` and upload this project.
-2. Create a Workers KV namespace named `STATE` and an R2 bucket named `repoforge-archives`.
-3. Replace the KV namespace ID in `worker/wrangler.toml`.
-4. Configure Worker variables and secrets; deploy with Wrangler.
-5. Set the Worker URL in `site/config.js` and set `SITE_ORIGIN` in `wrangler.toml` to the **origin only** of your GitHub Pages site (no repository path).
-6. Enable GitHub Pages using GitHub Actions.
-7. Register the Telegram webhook and add the public command list from `BOT_COMMANDS.txt` in BotFather.
+`https://mehrdadmb2.github.io/repoforge/`
 
-## Deployment behavior
+The Worker URL remains a placeholder until the Worker is deployed in your Cloudflare account. Put the actual `workers.dev` URL in the root `config.js` and use it when setting the Telegram webhook.
 
-A pending job stores the archive in R2 and metadata in KV. Its preview contains all ZIP paths plus all repository-only paths. Default actions are `Update` for ZIP files and `Keep` for repository-only files. The administrator can change each action in the web review modal or Telegram file browser.
+## Validation
 
-Before the target branch is changed, RepoForge creates a backup branch pointing to the current HEAD. It then creates blobs for selected ZIP files, creates a tree based on the current tree, creates one commit whose parent is the current HEAD, and updates the branch ref with `force: false`.
+From `worker/`:
 
-A restore creates a new commit using the selected backup tree and the current branch HEAD as its parent. It also creates a pre-restore backup. This keeps history append-only and avoids force-pushing an old commit pointer.
+```powershell
+npm install
+npm run check
+npm test
+npx wrangler deploy
+```
 
-## Limitations / planned extensions
+The tests validate the browser ZIP parser and path/branch validation locally. They do not replace a live integration test with your GitHub PAT, Cloudflare KV namespace, Telegram token and webhook.
 
-- This starter is a single-administrator deployment manager, not a general Git hosting platform.
-- GitHub branch listing currently reads up to 100 branches per repository.
-- Recursive Git tree responses marked truncated are rejected rather than showing an incomplete destructive preview.
-- The current implementation uses a single Git tree/commit and a configurable 25-file cap. It does not implement Git LFS uploads, submodule management, releases, repository creation/deletion, branch protection changes, or pull-request approval flows.
-- Pending ZIP files are retained in R2 until bucket lifecycle cleanup. Configure an R2 lifecycle rule to expire objects under `uploads/` after 14 days.
-- The dashboard source is public on a public GitHub Pages site. The API and actions are password-protected; the static source is not confidential.
+## Safety notes
 
-## Documentation
-
-- [Persian setup guide](docs/SETUP-FA.md)
-- [Architecture and deployment flow](docs/ARCHITECTURE.md)
-- [Security model and threat checklist](docs/SECURITY.md)
-- [Banner and avatar image prompts](docs/BRAND-PROMPTS.md)
-- [Bot commands](BOT_COMMANDS.txt)
+- Start with a test repository before granting access to important projects.
+- The allowlist is an additional restriction beyond GitHub token permissions.
+- Do not grant `Workflows` write permission unless you actually need to modify `.github/workflows/*`.
+- Backups are Git branches in the target repository and their metadata is indexed in KV. Do not delete backup branches manually if you expect to restore them from the dashboard.
+- A backup is not an independent off-site archive. For critical repositories, also keep GitHub-native or local backups.
