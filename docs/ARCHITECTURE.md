@@ -1,4 +1,4 @@
-# RepoForge v2.0 architecture
+# RepoForge v2.1 architecture
 
 ## Components
 
@@ -81,3 +81,8 @@ A backup creates a branch `repoforge-backup-<timestamp>-<id>` at the exact commi
 ## Cross-origin model
 
 The Pages site and Worker are different origins. `SITE_ORIGIN` must contain the origin only, for example `https://mehrdadmb2.github.io`, not the `/repoforge/` path. Authenticated browser API calls carry a signed bearer token and must originate from an allowlisted origin. The dashboard URL includes the repository path and is configured separately as `DASHBOARD_URL`.
+
+
+## v2.1 authentication and webhook secret handling
+
+`DASHBOARD_PASSWORD` and `SESSION_SECRET` accept any non-empty string; there is no enforced minimum character count. Short values are weaker and remain subject to IP-based login throttling. `TELEGRAM_WEBHOOK_SECRET` also accepts any non-empty text; the Worker derives the fixed Telegram-compatible header value as lowercase SHA-256 hex. The helper script registers that derived value with Telegram and the Worker temporarily accepts the previous raw header for migration compatibility.

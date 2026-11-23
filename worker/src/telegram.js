@@ -7,6 +7,24 @@ import { escapeHtml, isoNow, makeId, parseCommand, writeEvent } from "./utils.js
 const STAGE_TTL = 60 * 60;
 const PAGE_SIZE = 7;
 
+/**
+ * Telegram only accepts a restricted, finite-length secret_token header. The
+ * operator-facing Worker secret can therefore be any non-empty text: derive a
+ * 64-character hexadecimal SHA-256 header value for setWebhook.
+ */
+export async function deriveTelegramWebhookHeaderSecret(rawSecret) {
+  const bytes = new TextEncoder().encode(String(rawSecret ?? ""));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function constantTimeTextEqual(left, right) {
+  if (typeof left !== "string" || typeof right !== "string" || left.length !== right.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < left.length; index++) mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  return mismatch === 0;
+}
+
 async function telegramApi(env, method, body) {
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
     method: "POST",
@@ -429,12 +447,20 @@ async function handleCallback(env, callback) {
 }
 
 export async function handleTelegramWebhook(request, env, ctx = null) {
-  if (!env.TELEGRAM_BOT_TOKEN || !/^\d+$/.test(String(env.TELEGRAM_ADMIN_ID || "")) || String(env.TELEGRAM_WEBHOOK_SECRET || "").length < 24) {
-    return new Response("Telegram is not configured. Check bot token, numeric admin ID, and webhook secret.", { status: 503 });
+  const rawWebhookSecret = typeof env.TELEGRAM_WEBHOOK_SECRET === "string" ? env.TELEGRAM_WEBHOOK_SECRET : "";
+  if (!env.TELEGRAM_BOT_TOKEN || !/^\d+$/.test(String(env.TELEGRAM_ADMIN_ID || "")) || rawWebhookSecret.length === 0) {
+    return new Response("Telegram is not configured. Set a bot token, numeric admin ID, and a non-empty webhook secret.", { status: 503 });
   }
-  if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
-    return new Response("Forbidden", { status: 403 });
-  }
+
+  const receivedSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
+  const derivedSecret = await deriveTelegramWebhookHeaderSecret(rawWebhookSecret);
+  // `receivedSecret === rawWebhookSecret` is a compatibility path for older
+  // deployments. New setup scripts register the derived, Telegram-safe value.
+  const acceptedSecret = Number(
+    constantTimeTextEqual(receivedSecret, derivedSecret) |
+    constantTimeTextEqual(receivedSecret, rawWebhookSecret)
+  );
+  if (!acceptedSecret) return new Response("Forbidden", { status: 403 });
   let update;
   try { update = await request.json(); }
   catch { return new Response("Bad Request", { status: 400 }); }

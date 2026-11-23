@@ -4,7 +4,7 @@
 
 RepoForge lets one administrator upload a project ZIP, compare it with a selected GitHub repository and branch, decide file-by-file what to update, keep or delete, create a Git backup, and publish the selected changes as one commit.
 
-## v2.0.0 — Free-plan architecture
+## v2.1.0 — Configured Free-plan release
 
 This release fixes the original deployment layout and removes the R2 dependency completely.
 
@@ -16,7 +16,9 @@ This release fixes the original deployment layout and removes the R2 dependency 
 - Telegram ZIP uploads store only a temporary Telegram file reference in KV; the Worker streams the archive to the signed-in dashboard on demand.
 - Each file payload is sent to KV in its own small HTTP request. GitHub blobs are also created one per request. A final request creates one Git Tree, one Commit and advances the branch without force-pushing.
 - The bot accepts commands only from the configured numeric Telegram administrator ID in a private chat.
-- The dashboard has password authentication, HMAC-signed sessions, short-lived session storage and login throttling.
+- The dashboard has password authentication, HMAC-signed sessions, short-lived session storage and login throttling. Non-empty passwords and session secrets of any length are accepted; short values remain less secure.
+- The configured Worker endpoint is `https://repoforge-worker.game-developer-mb.workers.dev`; Pages and Telegram URLs are preconfigured.
+- Telegram webhook setup hashes any non-empty operator secret to a Telegram-compatible 64-character header token; the old raw-header format remains temporarily compatible.
 
 ## Repository layout
 
@@ -40,6 +42,10 @@ repoforge/
 │       ├── github.js          # GitHub Git Database, backups and deployments
 │       ├── telegram.js        # Admin-only bot and ZIP staging
 │       └── utils.js
+├── scripts/
+│   ├── Deploy-Worker.ps1
+│   ├── Set-TelegramWebhook.ps1
+│   └── Test-RepoForge.ps1
 ├── docs/
 │   ├── SETUP-FA.md
 │   ├── ARCHITECTURE.md
@@ -102,11 +108,11 @@ Only the public dashboard origin and base URL are stored in `wrangler.toml` and 
 
 ## Quick start
 
-See **[docs/SETUP-FA.md](docs/SETUP-FA.md)** for the complete Windows PowerShell setup. The dashboard URL for this repository is:
+See **[docs/SETUP-FA.md](docs/SETUP-FA.md)** for the complete Windows PowerShell and Wrangler setup, including the webhook helper scripts. The dashboard URL for this repository is:
 
 `https://mehrdadmb2.github.io/repoforge/`
 
-The Worker URL remains a placeholder until the Worker is deployed in your Cloudflare account. Put the actual `workers.dev` URL in the root `config.js` and use it when setting the Telegram webhook.
+The Worker endpoint is configured as `https://repoforge-worker.game-developer-mb.workers.dev`. The dashboard URL is `https://mehrdadmb2.github.io/repoforge/`, and the bot URL is `https://t.me/RepoForgeManagerBot`. Run `scripts/Set-TelegramWebhook.ps1` with the same raw `TELEGRAM_WEBHOOK_SECRET` value stored in Wrangler after deploying the Worker. This value may be any non-empty text; the helper derives the Telegram-compatible header value.
 
 ## Validation
 

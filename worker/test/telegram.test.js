@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleTelegramWebhook, streamTelegramStageArchive } from "../src/telegram.js";
+import { deriveTelegramWebhookHeaderSecret, handleTelegramWebhook, streamTelegramStageArchive } from "../src/telegram.js";
 
 class MemoryKV {
   constructor(initial = {}) { this.data = new Map(Object.entries(initial)); }
@@ -105,4 +105,26 @@ test("Telegram archive is streamed from Telegram and limited to the administrato
   } finally {
     globalThis.fetch = previousFetch;
   }
+});
+
+
+test("Telegram accepts a one-character raw webhook secret through its derived header", async () => {
+  const env = envBase();
+  env.TELEGRAM_WEBHOOK_SECRET = "x";
+  const headerSecret = await deriveTelegramWebhookHeaderSecret("x");
+  const response = await handleTelegramWebhook(request({ update_id: 404 }, headerSecret), env);
+  assert.equal(response.status, 200);
+});
+
+test("Telegram webhook rejects an empty configured raw secret", async () => {
+  const env = envBase();
+  env.TELEGRAM_WEBHOOK_SECRET = "";
+  const response = await handleTelegramWebhook(request({ update_id: 405 }), env);
+  assert.equal(response.status, 503);
+});
+
+test("Telegram webhook remains compatible with a previously registered raw secret", async () => {
+  const env = envBase();
+  const response = await handleTelegramWebhook(request({ update_id: 406 }, env.TELEGRAM_WEBHOOK_SECRET), env);
+  assert.equal(response.status, 200);
 });

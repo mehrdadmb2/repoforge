@@ -60,3 +60,32 @@ test("dashboard login rate-limits repeated failed passwords", async () => {
   const limited = await login(loginRequest("wrong-password", env.SITE_ORIGIN, "192.0.2.20"), env);
   assert.equal(limited.status, 429);
 });
+
+
+test("dashboard accepts a one-character password and one-character session secret", async () => {
+  const env = createEnv();
+  env.DASHBOARD_PASSWORD = "x";
+  env.SESSION_SECRET = "s";
+  const response = await login(loginRequest("x"), env);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(await verifySessionToken(body.token, env), true);
+});
+
+test("dashboard rejects empty configured secrets without requiring a minimum length", async () => {
+  const env = createEnv();
+  env.DASHBOARD_PASSWORD = "";
+  const missingPassword = await login(loginRequest("x"), env);
+  assert.equal(missingPassword.status, 503);
+
+  env.DASHBOARD_PASSWORD = "x";
+  env.SESSION_SECRET = "";
+  const missingSessionSecret = await login(loginRequest("x"), env);
+  assert.equal(missingSessionSecret.status, 503);
+});
+
+test("dashboard rejects an empty submitted password", async () => {
+  const env = createEnv();
+  const response = await login(loginRequest(""), env);
+  assert.equal(response.status, 400);
+});

@@ -13,7 +13,7 @@ export async function githubRequest(env, path, options = {}) {
       "Accept": "application/vnd.github+json",
       "Authorization": `Bearer ${env.GITHUB_TOKEN}`,
       "X-GitHub-Api-Version": API_VERSION,
-      "User-Agent": "RepoForge/2.0",
+      "User-Agent": "RepoForge/2.1",
       ...(options.headers || {})
     }
   });

@@ -15,6 +15,8 @@ function fromB64Url(value) {
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
+// Web Crypto accepts HMAC keys of any non-zero byte length. RepoForge does not
+// impose an arbitrary character-count minimum; entropy remains the operator's choice.
 async function hmacKey(secret) {
   return crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
@@ -26,11 +28,12 @@ async function sign(payload, secret) {
 }
 
 export async function verifySessionToken(token, env) {
-  if (!token || !env.SESSION_SECRET) return false;
+  const secret = typeof env.SESSION_SECRET === "string" ? env.SESSION_SECRET : "";
+  if (!token || secret.length === 0) return false;
   const parts = token.split(".");
   if (parts.length !== 2) return false;
   try {
-    const valid = await crypto.subtle.verify("HMAC", await hmacKey(env.SESSION_SECRET), fromB64Url(parts[1]), encoder.encode(parts[0]));
+    const valid = await crypto.subtle.verify("HMAC", await hmacKey(secret), fromB64Url(parts[1]), encoder.encode(parts[0]));
     if (!valid) return false;
     const payload = JSON.parse(decoder.decode(fromB64Url(parts[0])));
     if (payload?.role !== "admin" || Number(payload.exp) <= Math.floor(Date.now() / 1000) || !payload.nonce) return false;
@@ -56,9 +59,12 @@ async function rateLimitKey(request) {
 }
 
 export async function login(request, env) {
-  if (!env.DASHBOARD_PASSWORD || env.DASHBOARD_PASSWORD.length < 12 || !env.SESSION_SECRET || env.SESSION_SECRET.length < 32) {
-    return json({ error: "Dashboard authentication is not configured safely. Use a password of at least 12 characters and a SESSION_SECRET of at least 32 characters." }, 503);
+  const configuredPassword = typeof env.DASHBOARD_PASSWORD === "string" ? env.DASHBOARD_PASSWORD : "";
+  const sessionSecret = typeof env.SESSION_SECRET === "string" ? env.SESSION_SECRET : "";
+  if (configuredPassword.length === 0 || sessionSecret.length === 0) {
+    return json({ error: "Dashboard authentication is not configured. Set non-empty DASHBOARD_PASSWORD and SESSION_SECRET Worker secrets." }, 503);
   }
+
   const origin = request.headers.get("Origin") || "";
   const allowedOrigins = (env.SITE_ORIGIN || "").split(",").map((v) => v.trim()).filter(Boolean);
   if (!allowedOrigins.includes(origin)) return json({ error: "Origin is not allowed." }, 403);
@@ -69,8 +75,12 @@ export async function login(request, env) {
 
   let body;
   try { body = await request.json(); } catch { return json({ error: "Invalid request body." }, 400); }
-  const supplied = String(body.password || "");
-  const [expectedHash, suppliedHash] = await Promise.all([hash(env.DASHBOARD_PASSWORD), hash(supplied)]);
+  if (typeof body?.password !== "string" || body.password.length === 0) {
+    return json({ error: "Enter a non-empty dashboard password." }, 400);
+  }
+
+  const supplied = body.password;
+  const [expectedHash, suppliedHash] = await Promise.all([hash(configuredPassword), hash(supplied)]);
   if (!constantTimeEqual(expectedHash, suppliedHash)) {
     await env.STATE.put(key, String(current + 1), { expirationTtl: 900 });
     return json({ error: "Incorrect password." }, 401);
@@ -81,7 +91,7 @@ export async function login(request, env) {
   const ttl = Math.min(86400, Math.max(900, Number(env.SESSION_TTL_SECONDS || 21600)));
   const nonce = crypto.randomUUID();
   await env.STATE.put(`session:${nonce}`, "1", { expirationTtl: ttl });
-  const token = await sign({ role: "admin", iat: now, exp: now + ttl, nonce }, env.SESSION_SECRET);
+  const token = await sign({ role: "admin", iat: now, exp: now + ttl, nonce }, sessionSecret);
   return json({ ok: true, token, expiresAt: new Date((now + ttl) * 1000).toISOString() });
 }
 

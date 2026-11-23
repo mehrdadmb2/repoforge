@@ -1,158 +1,84 @@
-# راه‌اندازی RepoForge v2.0 روی پلن رایگان Cloudflare
+# راه‌اندازی نهایی RepoForge v2.1.0 — Windows + Wrangler + Cloudflare Free
 
-این نسخه مخصوص معماری GitHub Pages + Cloudflare Workers Free + Workers KV + Telegram Bot طراحی شده است. **به R2، D1، Durable Objects یا Workers Paid نیاز ندارد.**
+این نسخه برای GitHub Pages + Cloudflare Workers Free + یک Workers KV Namespace + Telegram طراحی شده است. به R2، D1، Durable Objects یا Workers Paid نیاز ندارد.
 
-آدرس‌های این پروژه:
+## آدرس‌های نهایی
 
-- Repository: `https://github.com/mehrdadmb2/repoforge`
+- GitHub: `https://github.com/mehrdadmb2/repoforge`
 - GitHub Pages: `https://mehrdadmb2.github.io/repoforge/`
-- Telegram bot: `https://t.me/RepoForgeManagerBot`
-- Worker: پس از Deploy از حساب Cloudflare تو مشخص می‌شود؛ فعلاً در `config.js` جایگزین دارد.
+- Worker: `https://repoforge-worker.game-developer-mb.workers.dev`
+- Telegram: `https://t.me/RepoForgeManagerBot`
 
-> نکته بسیار مهم: سایت از فایل `index.html` در ریشه ریپو شروع می‌شود. Workflow انتشار نیز فقط `index.html`، `config.js` و `assets/` را از ریشه در پوشه موقت `dist/` جمع می‌کند. پوشه‌های `worker/` و `docs/` وارد Artifact عمومی Pages نمی‌شوند.
+`config.js` از قبل به Worker واقعی تنظیم شده است. `SITE_ORIGIN` در `worker/wrangler.toml` باید فقط `https://mehrdadmb2.github.io` باشد و `DASHBOARD_URL` باید آدرس کامل Pages با مسیر `/repoforge/` باشد.
 
-## ۰. پیش‌نیازها
+## 1) پیش‌نیازها و مسیر پروژه
 
-- Node.js نسخه LTS و npm
-- GitHub account و دسترسی به ریپوهایی که می‌خواهی مدیریت کنی
-- Cloudflare account با Workers Free و Workers KV فعال
-- رباتی که قبلاً در BotFather ساخته‌ای: `@RepoForgeManagerBot`
-- PowerShell ویندوز
-
-در Worker Free سقف CPU هر درخواست ۱۰ میلی‌ثانیه است؛ به همین دلیل استخراج ZIP در مرورگر و ارسال هر فایل/Blob در درخواست جدا انجام می‌شود. Workers KV پلن Free شامل ۱ namespace تا ۱ GB storage، حداکثر ۲۵ MiB برای هر value، ۱۰۰ هزار read و ۱۰۰۰ write در روز است. Telegram `getFile` نیز فعلاً دانلود حداکثر ۲۰ MB را پشتیبانی می‌کند. محدودیت ZIP پروژه روی ۱۹ MiB قرار داده شده است.
-
-منابع رسمی:
-
-- Workers limits: https://developers.cloudflare.com/workers/platform/limits/
-- Workers KV limits: https://developers.cloudflare.com/kv/platform/limits/
-- Workers KV pricing: https://developers.cloudflare.com/kv/platform/pricing/
-- Telegram Bot API: https://core.telegram.org/bots/api#getfile
-- GitHub Pages 404 troubleshooting: https://docs.github.com/en/pages/getting-started-with-github-pages/troubleshooting-404-errors
-
-## ۱. جایگزین‌کردن فایل‌های ریپو
-
-1. از ریپوی فعلی یک Backup یا ZIP محلی بگیر.
-2. فایل ZIP نسخه جدید را Extract کن.
-3. محتویات پوشه `repoforge-v2` را در ریشه ریپوی `mehrdadmb2/repoforge` قرار بده و فایل‌های قدیمی را Replace کن.
-4. پوشه قدیمی `site/` را از ریپو حذف کن؛ نسخه جدید سایت را از ریشه منتشر می‌کند و دیگر از `site/` استفاده نمی‌شود.
-5. بررسی کن این مسیرها دقیقاً وجود داشته باشند:
-
-```text
-repoforge/
-├── index.html
-├── config.js
-├── .nojekyll
-├── assets/
-│   ├── app.js
-│   ├── zip.js
-│   ├── styles.css
-│   └── repoforge.svg
-├── .github/workflows/pages.yml
-└── worker/
-    ├── wrangler.toml
-    └── src/
-```
-
-6. تغییرات را روی شاخه `main` Push کن.
-
-## ۲. تنظیم GitHub Pages
-
-در GitHub:
-
-1. وارد `mehrdadmb2/repoforge` شو.
-2. Settings → Pages را باز کن.
-3. در Build and deployment، گزینه **GitHub Actions** را انتخاب کن.
-4. به تب Actions برو و Workflow با نام `Deploy RepoForge dashboard to GitHub Pages` را اجرا/بررسی کن.
-5. وقتی Workflow سبز شد، سایت را باز کن:
-
-```text
-https://mehrdadmb2.github.io/repoforge/
-```
-
-Workflow یک پوشه `dist` می‌سازد و فقط فایل‌های عمومی سایت را در سطح بالای Artifact قرار می‌دهد. بنابراین `index.html` در ریشه Artifact وجود دارد و هم‌زمان سورس Worker عمومی نمی‌شود.
-
-## ۳. ساخت Workers KV (فقط یک‌بار)
-
-در Cloudflare Dashboard:
-
-1. Workers & Pages → KV را باز کن.
-2. یک Namespace با نام `STATE` بساز.
-
-یا از PowerShell:
+PowerShell 7 یا Windows PowerShell، Node.js LTS، npm، Git و دسترسی به حساب Cloudflare و GitHub لازم است.
 
 ```powershell
-cd path\to\repoforge\worker
+node -v
+npm -v
+git --version
+npx wrangler --version
+```
+
+اگر پوشه محلی را نداری:
+
+```powershell
+mkdir "$HOME\Documents\GitHub" -Force
+cd "$HOME\Documents\GitHub"
+git clone https://github.com/mehrdadmb2/repoforge.git
+cd .\repoforge
+```
+
+## 2) به‌روزرسانی ریپو و GitHub Pages
+
+```powershell
+git pull --ff-only origin main
+```
+
+ساختار اصلی باید شامل `index.html` و `config.js` در ریشه و `assets/` در ریشه باشد. پوشه `site/` دیگر استفاده نمی‌شود.
+
+در GitHub → Settings → Pages → Build and deployment، Source را روی **GitHub Actions** بگذار. Workflow از `index.html`, `config.js` و `assets/` یک Artifact تمیز می‌سازد و فایل Worker یا مستندات را عمومی نمی‌کند.
+
+پس از Push تغییرات سایت، در Actions بررسی کن `Deploy RepoForge dashboard to GitHub Pages` سبز شود.
+
+## 3) ساخت KV (فقط یک‌بار)
+
+```powershell
+cd "$HOME\Documents\GitHub\repoforge\worker"
+npx wrangler login
+npx wrangler whoami
 npx wrangler kv namespace create STATE
 ```
 
-خروجی دارای یک `id` است. فایل `worker/wrangler.toml` را باز کن و مقدار زیر را جایگزین کن:
+شناسه `id` خروجی را در `worker/wrangler.toml` در قسمت زیر قرار بده:
 
 ```toml
 [[kv_namespaces]]
 binding = "STATE"
-id = "PASTE_REAL_KV_NAMESPACE_ID"
+id = "YOUR_REAL_NAMESPACE_ID"
 ```
 
-**هیچ دستور R2 اجرا نکن.** در این نسخه هیچ binding یا dependency مربوط به R2 وجود ندارد.
+اگر قبلاً Namespace مربوط به RepoForge را ساخته‌ای، همان ID موجود را نگه دار و KV جدید نساز.
 
-## ۴. ساخت Fine-grained GitHub token
+**هیچ دستور R2 اجرا نکن.**
 
-از GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens یک توکن بساز.
+## 4) ساخت GitHub Fine-grained Token
 
-پیشنهاد:
+از GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens یک Token بساز:
 
-- Token name: `RepoForge Worker`
-- Resource owner: مالک ریپوهای هدف
-- Repository access: فقط ریپوهای موردنیاز؛ از All repositories استفاده نکن مگر واقعاً لازم باشد.
-- `Metadata`: Read-only
-- `Contents`: Read and write
-- `Workflows`: فقط اگر می‌خواهی فایل‌های `.github/workflows/*` را ویرایش کنی، Read and write
+- Resource owner: `mehrdadmb2`
+- Repository access: فقط ریپوهای موردنیاز
+- Metadata: Read-only
+- Contents: Read and write
+- Workflows: فقط در صورت نیاز واقعی به تغییر فایل‌های `.github/workflows/*`
 
-برای مدیریت فایل‌ها، Tree، Blob، Commit، Branch و Backup معمولاً `Contents: Read and write` کافی است. این پروژه برای عملیات معمول فایل‌ها به Full Account Access نیاز ندارد.
+برای قابلیت‌های اصلی RepoForge، دسترسی Full Account یا توکن Classic با همه مجوزها لازم نیست.
 
-## ۵. تنظیم آدرس‌های عمومی
+## 5) ثبت Secretهای Worker
 
-### `worker/wrangler.toml`
-
-متغیرها از قبل برای آدرس Pages این ریپو تنظیم شده‌اند:
-
-```toml
-SITE_ORIGIN = "https://mehrdadmb2.github.io"
-DASHBOARD_URL = "https://mehrdadmb2.github.io/repoforge/"
-```
-
-مهم: `SITE_ORIGIN` فقط Origin است و نباید مسیر `/repoforge/` داشته باشد. `DASHBOARD_URL` آدرس کامل صفحه است و باید مسیر ریپو را داشته باشد.
-
-### `config.js`
-
-این فایل در ریشه ریپو است. پس از ساخت Worker، مقدار `apiBase` را به آدرس واقعی آن تغییر بده:
-
-```javascript
-window.REPOFORGE_CONFIG = Object.freeze({
-  apiBase: "https://repoforge-worker.YOUR-SUBDOMAIN.workers.dev",
-  dashboardUrl: "https://mehrdadmb2.github.io/repoforge/",
-  botUrl: "https://t.me/RepoForgeManagerBot",
-  limits: Object.freeze({
-    maxArchiveBytes: 19 * 1024 * 1024,
-    maxExpandedBytes: 16 * 1024 * 1024,
-    maxFileBytes: 1 * 1024 * 1024,
-    maxFiles: 400
-  })
-});
-```
-
-`apiBase` باید فقط آدرس ریشه Worker باشد، بدون `/api` و بدون اسلش انتهایی.
-
-## ۶. آماده‌سازی Worker در ویندوز
-
-```powershell
-cd path\to\repoforge\worker
-npm install
-npm run check
-npm test
-```
-
-اگر دو مرحله بررسی موفق بود، Secretها را ثبت کن. هر دستور مقدار را در حالت تعاملی می‌گیرد:
+از PowerShell داخل پوشه `worker` اجرا کن. هر دستور مقدار را تعاملی دریافت می‌کند:
 
 ```powershell
 npx wrangler secret put GITHUB_TOKEN
@@ -164,213 +90,142 @@ npx wrangler secret put DASHBOARD_PASSWORD
 npx wrangler secret put SESSION_SECRET
 ```
 
-مقدار هر مورد:
+مقادیر:
 
 | Secret | مقدار |
 |---|---|
-| `GITHUB_TOKEN` | Fine-grained PAT ساخته‌شده در مرحله ۴ |
-| `ALLOWED_REPOS` | فهرست ریپوها با فرمت `owner/repo,owner/repo2` |
-| `TELEGRAM_BOT_TOKEN` | توکن BotFather برای `@RepoForgeManagerBot` |
-| `TELEGRAM_ADMIN_ID` | شناسه عددی اکانت تلگرام خودت؛ نه Username و نه شماره تلفن |
-| `TELEGRAM_WEBHOOK_SECRET` | حداقل ۲۴ کاراکتر تصادفی، حروف/عدد و `_` یا `-` |
-| `DASHBOARD_PASSWORD` | رمز مستقل داشبورد، حداقل ۱۲ کاراکتر |
-| `SESSION_SECRET` | مقدار تصادفی قوی، حداقل ۳۲ کاراکتر |
+| `GITHUB_TOKEN` | Fine-grained PAT |
+| `ALLOWED_REPOS` | `mehrdadmb2/repoforge` یا لیست ریپوها با کاما |
+| `TELEGRAM_BOT_TOKEN` | توکن BotFather |
+| `TELEGRAM_ADMIN_ID` | شناسه عددی ادمین تلگرام |
+| `TELEGRAM_WEBHOOK_SECRET` | هر متن غیرخالی؛ طول دلخواه |
+| `DASHBOARD_PASSWORD` | هر رمز غیرخالی؛ طول دلخواه |
+| `SESSION_SECRET` | هر متن غیرخالی؛ طول دلخواه |
 
-نمونه ALLOWED_REPOS:
+### سیاست طول رمزها
 
-```text
-mehrdadmb2/repoforge,mehrdadmb2/your-next-repository
-```
+RepoForge برای رمز داشبورد، Session Secret و مقدار اصلی Webhook هیچ حداقل تعداد کاراکتری تحمیل نمی‌کند. مقادیر خالی پذیرفته نمی‌شوند. رمز یک‌کاراکتری هم کار می‌کند، اما به‌راحتی قابل حدس است؛ برای امنیت بهتر، رمز داشبورد را منحصربه‌فرد و Session/Webhook Secret را تصادفی و طولانی انتخاب کن. این توصیه امنیتی است، نه محدودیت فنی اجباری.
 
-فقط ریپوهایی را وارد کن که واقعاً می‌خواهی از طریق ربات و داشبورد مدیریت شوند.
+`TELEGRAM_ADMIN_ID` همچنان باید فقط عدد باشد. توکن BotFather باید معتبر باشد.
 
-### تولید Secret تصادفی در PowerShell
+### نکته مهم درباره Telegram Webhook Secret
 
-```powershell
-$bytes = New-Object byte[] 48
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-$secret = [Convert]::ToHexString($bytes)
-$secret
-```
+Telegram برای `setWebhook.secret_token` محدودیت قالب و طول خودش را دارد. RepoForge این محدودیت را از مقدار اصلی پنهان می‌کند: Worker مقدار `TELEGRAM_WEBHOOK_SECRET` را با SHA-256 به یک مقدار hex شصت‌وچهارکاراکتری تبدیل می‌کند. اسکریپت مرحله 7 دقیقاً همان مقدار را به Telegram می‌دهد. پس در Wrangler مقدار اصلی را وارد کن، نه هش آن.
 
-برای `SESSION_SECRET` یک مقدار جداگانه تولید کن. برای `TELEGRAM_WEBHOOK_SECRET` هم مقدار جداگانه‌ای با حداقل ۲۴ کاراکتر بساز. رمز داشبورد را خودت انتخاب کن و از تکرار آن برای Secretهای دیگر خودداری کن.
-
-### فایل `.dev.vars`
-
-برای اجرای محلی می‌توانی فایل `worker/.dev.vars.example` را کپی کنی و نام آن را `.dev.vars` بگذاری. این فایل نباید Commit شود.
-
-## ۷. Deploy کردن Worker
-
-از پوشه `worker`:
+## 6) نصب و تست Worker
 
 ```powershell
+cd "$HOME\Documents\GitHub\repoforge\worker"
+npm install
+npm run check
+npm test
+```
+
+هر دو دستور Check و Test باید بدون خطا تمام شوند.
+
+## 7) ثبت یا به‌روزرسانی Webhook تلگرام
+
+پس از قرار گرفتن کد جدید روی Worker، از پوشه ریشه ریپو اجرا کن:
+
+```powershell
+cd "$HOME\Documents\GitHub\repoforge"
+.\scripts\Set-TelegramWebhook.ps1
+```
+
+اسکریپت ابتدا `/api/health` را بررسی می‌کند، سپس از توکن BotFather و مقدار اصلی `TELEGRAM_WEBHOOK_SECRET` که در Wrangler ذخیره کرده‌ای سؤال می‌کند، SHA-256 hex را می‌سازد، `setWebhook` را اجرا می‌کند و در پایان `getWebhookInfo` را نمایش می‌دهد.
+
+اگر قبلاً Webhook را با مقدار خام ثبت کرده‌ای، کد جدید موقتاً هر دو حالت خام و هش‌شده را قبول می‌کند؛ با اجرای اسکریپت به فرمت جدید مهاجرت کن.
+
+## 8) Deploy Worker با Wrangler
+
+پس از جایگزینی KV ID و ثبت Secretها:
+
+```powershell
+cd "$HOME\Documents\GitHub\repoforge"
+.\scripts\Deploy-Worker.ps1
+```
+
+یا دستی:
+
+```powershell
+cd .\worker
 npx wrangler deploy
 ```
 
-خروجی یک آدرس مشابه زیر می‌دهد:
+Worker باید روی همان آدرس قبلی به‌روزرسانی شود:
 
 ```text
-https://repoforge-worker.YOUR-SUBDOMAIN.workers.dev
+https://repoforge-worker.game-developer-mb.workers.dev
 ```
 
-آن را باز کن:
-
-```text
-https://YOUR-WORKER-URL.workers.dev/api/health
-```
-
-پاسخ صحیح باید شامل این مقادیر باشد:
-
-```json
-{
-  "ok": true,
-  "name": "RepoForge",
-  "version": "2.0.0",
-  "storage": "Cloudflare Workers KV",
-  "r2Required": false,
-  "planProfile": "workers-free"
-}
-```
-
-اگر `STATE` یا Secretها تنظیم نشده باشند، در بخش‌های مرتبط خطای پیکربندی می‌بینی.
-
-## ۸. اتصال URL نهایی Worker به Pages
-
-بعد از Deploy:
-
-1. آدرس Worker را در `config.js` در مقدار `apiBase` قرار بده.
-2. Push کن.
-3. صبر کن GitHub Actions، Pages را دوباره Deploy کند.
-4. سایت را باز کن و با رمز `DASHBOARD_PASSWORD` وارد شو.
-
-برای اطمینان از اتصال، Overview باید تعداد ریپوهای Allowlist، تعداد Jobها و Backupها را نشان دهد.
-
-## ۹. ثبت Webhook ربات تلگرام
-
-در PowerShell این دستورات را اجرا کن:
+تست سلامت:
 
 ```powershell
-$BotToken = Read-Host "Telegram bot token"
-$WorkerUrl = Read-Host "Worker URL, without trailing slash"
-$WebhookSecret = Read-Host "TELEGRAM_WEBHOOK_SECRET"
-
-$body = @{
-  url = "$WorkerUrl/telegram"
-  secret_token = $WebhookSecret
-  allowed_updates = @("message", "callback_query")
-} | ConvertTo-Json -Depth 4
-
-Invoke-RestMethod -Method Post `
-  -Uri "https://api.telegram.org/bot$BotToken/setWebhook" `
-  -ContentType "application/json" `
-  -Body $body
+Invoke-RestMethod "https://repoforge-worker.game-developer-mb.workers.dev/api/health" | ConvertTo-Json -Depth 5
 ```
 
-بررسی Webhook:
+باید `ok: true`, `version: 2.1.0`, `storage: Cloudflare Workers KV` و `r2Required: false` نمایش داده شود.
+
+## 9) Push تغییرات Pages و بررسی سایت
+
+از ریشه ریپو:
 
 ```powershell
-Invoke-RestMethod -Uri "https://api.telegram.org/bot$BotToken/getWebhookInfo"
+git add -A
+git status
+git commit -m "Configure RepoForge v2.1.0 endpoints and flexible secrets"
+git push origin main
 ```
 
-URL باید با آدرس Worker و مسیر `/telegram` یکسان باشد. `last_error_message` نباید خطای جاری داشته باشد.
+Workflow Pages را بررسی و سپس سایت را باز کن:
 
-### ثبت دستورات BotFather
+`https://mehrdadmb2.github.io/repoforge/`
 
-1. وارد `@BotFather` شو.
-2. دستور `/setcommands` را ارسال کن.
-3. ربات را انتخاب کن.
-4. محتوای `BOT_COMMANDS.txt` را Paste کن؛ اسلش ابتدای command را وارد نکن.
+واردشدن با `DASHBOARD_PASSWORD` انجام می‌شود. هر رمز غیرخالی پذیرفته می‌شود و هیچ minimum length در Worker وجود ندارد.
 
-## ۱۰. سناریوی تست اجباری
+## 10) تست پایان‌به‌پایان
 
-ابتدا یک ریپوی آزمایشی بساز و در `ALLOWED_REPOS` قرار بده. روی ریپوی مهم تست اول را انجام نده.
+```powershell
+.\scripts\Test-RepoForge.ps1
+```
 
-ساختار فعلی تست:
+سپس در Telegram به `@RepoForgeManagerBot` پیام بده:
 
 ```text
-README.md
-keep-me.txt
-remove-me.txt
+/start
+/status
+/repos
 ```
 
-ZIP تست:
+ریپوی `mehrdadmb2/repoforge` را انتخاب کن، ZIP را به‌صورت Document ارسال کن و لینک خصوصی داشبورد را باز کن. در داشبورد فایل‌ها را بازبینی کن. ابتدا فقط روی ریپوی آزمایشی تست کن.
 
-```text
-release-test/
-├── README.md
-├── new-file.txt
-└── keep-me.txt
+## 11) لاگ و عیب‌یابی
+
+```powershell
+cd "$HOME\Documents\GitHub\repoforge\worker"
+npx wrangler tail --format pretty
 ```
 
-در داشبورد:
+- `401`: نشست منقضی شده یا رمز داشبورد اشتباه است.
+- `403 Origin`: `SITE_ORIGIN` باید دقیقاً `https://mehrdadmb2.github.io` باشد.
+- `503 STATE`: KV binding یا ID اشتباه است.
+- `GitHub API 401/403`: توکن GitHub یا مجوز Contents را بررسی کن.
+- `Telegram 403`: Webhook را با `scripts/Set-TelegramWebhook.ps1` دوباره ثبت کن و مطمئن شو همان مقدار اصلی secret را وارد می‌کنی.
+- `ALLOWED_REPOS`: فرمت باید `owner/repo` باشد و توکن نیز باید به آن ریپو دسترسی داشته باشد.
 
-1. رمز را وارد کن.
-2. ریپوی آزمایشی و branch موردنظر را انتخاب کن.
-3. ZIP را انتخاب و Inspect کن.
-4. `README.md` را Update، `keep-me.txt` را Keep و `remove-me.txt` را Delete انتخاب کن.
-5. مطمئن شو `new-file.txt` به‌صورت New/Add نمایش داده می‌شود.
-6. Save choices را بزن.
-7. Deploy را بزن.
-8. ابتدا Backup branch ساخته می‌شود؛ سپس Blobها جداگانه Upload می‌شوند و در آخر یک Commit منتشر می‌شود.
-9. GitHub branch را بررسی کن.
-10. از Backups، نسخه قبل از انتشار را Restore کن و commit بازگشت را بررسی کن.
+## 12) محدودیت‌های Free و نکات اجرایی
 
-در تست تلگرام:
+- پردازش ZIP در مرورگر انجام می‌شود تا Worker از CPU محدود Free استفاده سنگین نکند.
+- ارسال Blobها و مراحل انتشار به درخواست‌های کوچک تقسیم شده‌اند.
+- KV Free سهمیه روزانه دارد؛ آپلود ZIP با تعداد بسیار زیاد فایل می‌تواند سهمیه نوشتن را مصرف کند.
+- سقف‌های نرم پروژه: ZIP فشرده ۱۹ MiB، مجموع استخراج ۱۶ MiB، هر فایل ۱ MiB و ۴۰۰ فایل.
+- GitHub Pages در این مخزن عمومی است؛ رمز داشبورد API را محافظت می‌کند، نه سورس HTML/CSS/JS را.
+- Backupها به‌صورت Git Branch در همان ریپو ذخیره می‌شوند؛ برای اطلاعات حیاتی، Backup مستقل خارج از ریپو نیز نگه دار.
 
-1. `/select` را بفرست و ریپو و branch را انتخاب کن.
-2. ZIP را به‌صورت Document ارسال کن.
-3. روی لینک داشبورد بزن و وارد شو.
-4. باید ZIP مرحله‌بندی‌شده به‌صورت خودکار در داشبورد باز و Preview ساخته شود.
-5. با `/jobs` و `/files` وضعیت و تصمیم‌های فایل را در بات بررسی کن.
-6. با `/deploy` فرایند را آغاز و از لینک داشبورد انتشار را کامل کن.
+## 13) Helper scripts
 
-## ۱۱. محدودیت‌ها و نکات اجرایی
+- `scripts/Deploy-Worker.ps1`: نصب وابستگی، check، test، deploy و health-check.
+- `scripts/Set-TelegramWebhook.ps1`: ثبت Webhook با secret مشتق‌شده و نمایش وضعیت.
+- `scripts/Test-RepoForge.ps1`: بررسی عمومی Worker و GitHub Pages.
 
-- Telegram Bot API رسمی دانلود ZIP بیش از ۲۰ MB را پشتیبانی نمی‌کند؛ برنامه ۱۹ MiB سقف گذاشته است.
-- هر فایل حداکثر ۱ MiB و مجموع فایل‌های استخراج‌شده حداکثر ۱۶ MiB است.
-- تعداد فایل‌های ZIP حداکثر ۴۰۰ و تغییرات هر Commit حداکثر ۱۰۰ است.
-- Workers Free روزانه ۱۰۰۰ KV write دارد؛ یک آپلود با ۴۰۰ فایل به بخشی از این سهمیه نیاز دارد. برای ZIPهای کوچک‌تر یا فقط فایل‌های تغییریافته اقدام کن.
-- Payloadهای فایل ۱۴ روز و ZIPهای مرحله‌بندی‌شده تلگرام یک ساعت نگه‌داری می‌شوند.
-- Git backup در همان GitHub repository ساخته می‌شود؛ اگر شاخه Backup را دستی حذف کنی، Restore آن ممکن نیست.
-- Worker CPU-limit را نمی‌توان با تنظیم `cpu_ms = 30000` دور زد؛ چنین تنظیمی در این پروژه استفاده نشده است.
-- این نسخه کاملاً بدون R2 است.
-
-## ۱۲. رفع اشکال
-
-**GitHub Pages خطای 404 می‌دهد:**
-
-- مطمئن شو Pages روی GitHub Actions است.
-- در Actions، مرحله Upload Pages artifact را باز کن و ببین `dist/index.html` وجود دارد.
-- آدرس دقیق ریپو `/repoforge/` است.
-
-**Dashboard می‌گوید Worker URL تنظیم نیست:**
-
-- مقدار `apiBase` در فایل ریشه `config.js` را بررسی کن.
-- بعد از تغییر config مطمئن شو Pages دوباره Deploy شده است.
-
-**Login خطای Origin not allowed می‌دهد:**
-
-- `SITE_ORIGIN` باید دقیقاً `https://mehrdadmb2.github.io` باشد.
-- مسیر `/repoforge/` را در `SITE_ORIGIN` وارد نکن.
-
-**Repo list خالی است یا خطای GitHub 401/403 می‌بینی:**
-
-- `GITHUB_TOKEN`، Owner، Repository access و Contents permission را بررسی کن.
-- نام ریپو در `ALLOWED_REPOS` باید دقیقاً `owner/repo` باشد.
-
-**Telegram پاسخ نمی‌دهد:**
-
-- `getWebhookInfo` را اجرا کن.
-- Secret Header، توکن BotFather و عدد `TELEGRAM_ADMIN_ID` را بررسی کن.
-- ربات فقط در Private chat ادمین را می‌پذیرد.
-
-**Deploy نیمه‌کاره متوقف شده:**
-
-- از داشبورد همان Job را باز کن.
-- اگر وضعیت `deploying` است، `Resume deployment` را بزن. Blobهای قبلی دوباره ارسال نمی‌شوند.
-- اگر `stale` است، Refresh preview را بزن و تصمیم‌های فایل را دوباره بررسی کن.
-- اگر Branch محافظت‌شده اجازه Push نمی‌دهد، خطای GitHub را بررسی کن؛ به‌صورت خودکار Force Push انجام نمی‌شود.
-
----
-
-نسخه: `2.0.0` · Storage: `Workers KV` · Runtime target: `Cloudflare Workers Free`
+نسخه: `2.1.0` · Storage: `Workers KV` · Runtime: `Cloudflare Workers Free`

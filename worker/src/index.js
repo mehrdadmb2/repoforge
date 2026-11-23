@@ -31,7 +31,7 @@ async function api(request, env) {
   const method = request.method.toUpperCase();
 
   if (path === "/api/health" && method === "GET") {
-    return json({ ok: true, name: "RepoForge", version: "2.0.0", storage: "Cloudflare Workers KV", r2Required: false, planProfile: "workers-free", time: new Date().toISOString() });
+    return json({ ok: true, name: "RepoForge", version: "2.1.0", storage: "Cloudflare Workers KV", r2Required: false, planProfile: "workers-free", time: new Date().toISOString() });
   }
   if (path === "/api/login" && method === "POST") return login(request, env);
   if (path === "/api/logout" && method === "POST") return logout(request, env);
@@ -249,7 +249,7 @@ export default {
     try {
       if (url.pathname === "/telegram" && request.method === "POST") return await handleTelegramWebhook(request, env, ctx);
       if (url.pathname.startsWith("/api/")) return withCors(await api(request, env), request, env);
-      if (url.pathname === "/") return new Response("RepoForge Worker 2.0 is running. Use /api/health.", { headers: { "content-type": "text/plain; charset=utf-8" } });
+      if (url.pathname === "/") return new Response("RepoForge Worker 2.1 is running. Use /api/health.", { headers: { "content-type": "text/plain; charset=utf-8" } });
       return new Response("Not Found", { status: 404 });
     } catch (error) {
       const response = json({ error: error?.message || "Unexpected server error." }, errorStatus(error));
